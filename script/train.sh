@@ -7,9 +7,9 @@ if [ "$#" -ne 2 ]; then
 fi
 
 
-dataset_name="$1"
+dataset_folder="$1"
 scale="$2"
-dataset_folder="data/$dataset_name"
+# dataset_folder="data/$dataset_name"
 
 if [ ! -d "$dataset_folder" ]; then
     echo "Error: Folder '$dataset_folder' does not exist."
@@ -18,7 +18,7 @@ fi
 
 
 # Gaussian Grouping training
-python train.py    -s $dataset_folder -r ${scale}  -m output/${dataset_name} --config_file config/gaussian_dataset/train.json
+python train.py    -s $dataset_folder -r ${scale}  -m $dataset_folder/output --config_file config/gaussian_dataset/train.json
 
 # Segmentation rendering using trained model
-python render.py -m output/${dataset_name} --num_classes 256
+python render.py -m $dataset_folder/output --num_classes 4

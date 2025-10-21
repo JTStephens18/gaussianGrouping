@@ -72,8 +72,33 @@ def visualize_obj(objects):
         rgb_mask[objects == id] = colored_mask
     return rgb_mask
 
+def subset_gaussians(gaussians, mask):
+    filtered = GaussianModel(gaussians.max_sh_degree)
+    for key, val in gaussians.__dict__.items():
+        if isinstance(val, torch.Tensor) and val.shape[0] == mask.shape[0]:
+            setattr(filtered, key, val[mask])
+        else:
+            setattr(filtered, key, val)
+    return filtered
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background, classifier):
+def get_masked_gaussians(gaussians, classifier, model_path, obj_id=None):
+    if obj_id == None:
+        return gaussians
+    logits3d = classifier(gaussians._objects_dc.permute(2, 0, 1))
+    probs3d = torch.softmax(logits3d, dim=0)
+    pred_labels = torch.argmax(probs3d, dim=0).squeeze()
+
+    print("Predicted labels:", torch.unique(pred_labels))
+
+    mask = (pred_labels == obj_id)
+    filtered_gaussians = subset_gaussians(gaussians, mask)
+
+    filtered_gaussians.save_ply(os.path.join(model_path, f"object_{obj_id}_gaussians.ply"))
+        
+    return filtered_gaussians
+
+
+def render_set(model_path, name, iteration, views, gaussians, pipeline, background, classifier, object_id):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     colormask_path = os.path.join(model_path, name, "ours_{}".format(iteration), "objects_feature16")
@@ -85,6 +110,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gt_colormask_path, exist_ok=True)
     makedirs(pred_obj_path, exist_ok=True)
 
+    gaussians = get_masked_gaussians(gaussians, classifier, model_path, object_id)
+    
+
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         results = render(view, gaussians, pipeline, background)
         rendering = results["render"]
@@ -93,7 +121,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         logits = classifier(rendering_obj)
         pred_obj = torch.argmax(logits,dim=0)
         pred_obj_mask = visualize_obj(pred_obj.cpu().numpy().astype(np.uint8))
-        
 
         gt_objects = view.objects
         gt_rgb_mask = visualize_obj(gt_objects.cpu().numpy().astype(np.uint8))
@@ -129,7 +156,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     writer.release()
 
 
-def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool):
+def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, object_id : int):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
@@ -145,10 +172,10 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
         if not skip_train:
-             render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, classifier)
+             render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, classifier, object_id)
 
         if (not skip_test) and (len(scene.getTestCameras()) > 0):
-             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, classifier)
+             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, classifier, object_id)
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -159,10 +186,11 @@ if __name__ == "__main__":
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--object_id", type=int, default=None, help="ID of the object to isolate and render")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test)
+    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.object_id)
