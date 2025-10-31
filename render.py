@@ -13,7 +13,7 @@ from tqdm import tqdm
 from os import makedirs
 from gaussian_renderer import render
 import torchvision
-from utils.general_utils import safe_state
+from utils.general_utils import safe_state, build_rotation, matrix_to_quaternion
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 from gaussian_renderer import GaussianModel
@@ -81,8 +81,8 @@ def subset_gaussians(gaussians, mask):
             setattr(filtered, key, val)
     return filtered
 
-def get_masked_gaussians(gaussians, classifier, model_path, obj_id=None):
-    if obj_id == None:
+def get_masked_gaussians(gaussians, classifier, model_path, obj_id=-1):
+    if obj_id == -1 or obj_id is None:
         return gaussians
     logits3d = classifier(gaussians._objects_dc.permute(2, 0, 1))
     probs3d = torch.softmax(logits3d, dim=0)
@@ -162,7 +162,6 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
         
         num_classes = dataset.num_classes
-        print("Num classes: ",num_classes)
 
         classifier = torch.nn.Conv2d(gaussians.num_objects, num_classes, kernel_size=1)
         classifier.cuda()
